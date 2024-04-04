@@ -1,0 +1,32 @@
+{% extends "Base.html" %}
+{% load static %}
+
+{% block content %}
+
+<html style="font-size: 16px;" lang="es"><head>
+  <title>Bienvenida</title>
+  <link rel="stylesheet" href="{% static 'index/css/nicepage.css' %}" media="screen">
+<link rel="stylesheet" href="{% static 'index/css/Bienvenida.css' %}" media="screen">
+  <script class="u-script" type="text/javascript" src="{% static 'index/js/jqueryB.js' %}" defer=""></script>
+  <script class="u-script" type="text/javascript" src="{% static 'index/js/nicepage.js' %}" defer=""></script>
+  <link id="u-theme-google-font" rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:100,100i,300,300i,400,400i,500,500i,700,700i,900,900i|Open+Sans:300,300i,400,400i,500,500i,600,600i,700,700i,800,800i">
+  <link id="u-page-google-font" rel="stylesheet" href="https://fonts.googleapis.com/css?family=Playfair+Display:400,400i,500,500i,600,600i,700,700i,800,800i,900,900i">
+</head>
+  <body class="u-body u-xl-mode" data-lang="es">
+    <section class="u-clearfix u-section-1" id="sec-8d32">
+      <div class="u-clearfix u-sheet u-sheet-1">
+        <div alt="" class="u-image u-image-circle u-image-1" src="" data-image-width="6016" data-image-height="4000"></div>
+        <h2 class="u-custom-font u-font-playfair-display u-text u-text-1">Bienvenido</h2>
+        <h2 class="u-custom-font u-font-courier-new u-text u-text-2" href="Login">{{user}}</h2>
+        <p class="u-text u-text-grey-50 u-text-3">Recuerda que queremos contribuir al crecimiento del sector farmacéutico
+                                              <br>por medio de la implementación de nuevas tecnologías, facilitando procesos
+                                              <br>y almacenando de forma confiable información relacionada con el negocio,
+                                              <br>proveedores y productos, apoyando en crecimiento de esta empresa y con ello 
+                                              <br>abriendo puertas a nuevas posibilidades de expansión y generando nuevas 
+                                              <br>áreas de trabajo.
+        </p>    
+      </div>
+    </section>
+  </body>
+</html>
+{% endblock %}

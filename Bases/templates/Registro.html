@@ -1,0 +1,26 @@
+{% extends "Principal.html" %}
+{% block content %}
+
+<form action="" method="POST">
+    <div class="window-notice">
+        <div class="content">
+            <div class="content-text">
+                {% csrf_token %}
+                {{form.as_p}}
+                <button class="u-active-white u-border-2 u-border-active-white u-border-hover-white u-border-palette-2-base u-btn u-button-style u-hover-white u-palette-2-base u-btn-1 content-buttons btn" type="submit">Registrar</button>
+                <div>
+                    Si ya tienes una cuenta, ve a <a href="{% url 'Login' %}">Iniciar Sesión</a>
+                </div>
+                <div>
+                    <div><a href="{% url 'Principal' %}">Atras</a></div> 
+                </div>
+            </div>
+        </div>
+    </div> 
+</form>
+
+{% endblock %}
+
+
+
+
