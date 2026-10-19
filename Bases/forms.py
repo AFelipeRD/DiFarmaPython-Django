@@ -31,7 +31,8 @@ class EditarProveedorForm (forms.ModelForm):
             'nombre': forms.TextInput(attrs={'id': 'nombre_editar'}),
             'numpedido': forms.NumberInput(attrs={'id': 'numpedido_editar'}),
             'fechapedido': forms.DateInput(attrs={'id': 'fechapedido_editar'}),
-            'contacto': forms.NumberInput(attrs={'id': 'contacto_editar'})
+            # Teléfono como texto (CharField en el modelo).
+            'contacto': forms.TextInput(attrs={'id': 'contacto_editar'})
         }
 
 #--------------------------------------------------------------------------------------------------------------
@@ -71,7 +72,8 @@ class EditarProductoForm (forms.ModelForm):
             'vencimiento': 'Fecha de Vencimiento'
         }
         widgets = {
-            'codigo': forms.NumberInput(attrs={'id': 'codigo_editar'}),
+            # Código como texto (CharField en el modelo).
+            'codigo': forms.TextInput(attrs={'id': 'codigo_editar'}),
             'nombre': forms.TextInput(attrs={'id': 'nombre_editar'}),
             'nproveedor': forms.TextInput(attrs={'id': 'nproveedor_editar'}),
             'precio': forms.NumberInput(attrs={'id': 'precio_editar'}),

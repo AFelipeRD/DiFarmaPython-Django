@@ -1,304 +1,411 @@
-from pyexpat.errors import messages
-from django.shortcuts import render, redirect
-from .models import Proveedor, Producto, ControlTemperatura
-from .forms import AddProveedorForm, EditarProveedorForm, AddProductoForm, EditarProductoForm, AddControlTemperaturaForm, EditarControlTemperaturaForm
+"""Vistas de la aplicación Bases (DiFarma).
+
+Reglas de esta refactorización:
+- TODO formulario se valida con form.is_valid() (con paréntesis); sin excepción.
+- Los mensajes de usuario usan messages.success/error (el módulo no se invoca).
+- Los borrados y ediciones usan get_object_or_404: nunca un 500 por un id inexistente.
+- El punto de venta (Ventas) implementa los dos endpoints que el frontend espera:
+  'autocomplete' (buscar productos) y 'save' (registrar la venta en una transacción).
+"""
+import json
+from decimal import Decimal, InvalidOperation
+
 from django.contrib import messages
-from django.contrib.auth import login, logout, authenticate
-from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
-
-from .mixins import ValidarPermisosMixin, ValidarRestriccionesMixin
-
-import time
-
-from .models import Egreso, Producto, Egreso, ProductosEgreso
-from django.views.generic import ListView
-from django.http import JsonResponse, HttpResponse
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
+from django.db import transaction
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import get_template
-from django.conf import settings
-import os
-#from weasyprint.text.fonts import FontConfiguration
+from django.utils import timezone
+from django.views.generic import ListView
 
-#--------------------------------------------------------------------------------------------------------------
+from .forms import (
+    AddControlTemperaturaForm,
+    AddProductoForm,
+    AddProveedorForm,
+    EditarControlTemperaturaForm,
+    EditarProductoForm,
+    EditarProveedorForm,
+)
+from .mixins import ValidarPermisosMixin, ValidarRestriccionesMixin
+from .models import ControlTemperatura, Egreso, Producto, ProductosEgreso, Proveedor
 
-# Create your views here.
-# Vistas Principales de la Aplicación
+# Tasa de IVA aplicada a las ventas (Colombia, 19 %). Ajustar si cambia la norma.
+TASA_IVA = Decimal("0.19")
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# VISTAS PRINCIPALES
+# ------------------------------------------------------------------------------------------------------------------
 def Principal_view(request):
-    return render(request, 'Principal.html')
+    """Página pública de entrada (landing)."""
+    return render(request, "Principal.html")
 
+
+@login_required(login_url="Login")
 def Index_view(request):
-    return render(request, 'Index.html')
+    """Panel principal; requiere sesión iniciada."""
+    return render(request, "Index.html")
+
 
 def Base_view(request):
-    return render(request, 'Base.html')
+    """Plantilla base de maquetación (solo referencia de desarrollo)."""
+    return render(request, "Base.html")
 
-#--------------------------------------------------------------------------------------------------------------
 
-# Vistas para el Inicio (Login, LogOut, Register)
-# Vista Login
+# ------------------------------------------------------------------------------------------------------------------
+# INICIO DE SESIÓN: LOGIN / LOGOUT / REGISTRO
+# ------------------------------------------------------------------------------------------------------------------
 def Login_view(request):
+    """Autenticación con el formulario estándar de Django."""
     if request.method == "POST":
         form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            usuario = form.cleaned_data.get('username')
-            contraseña = form.cleaned_data.get('password')
+            usuario = form.cleaned_data.get("username")
+            contraseña = form.cleaned_data.get("password")
             user = authenticate(username=usuario, password=contraseña)
             if user is not None:
                 login(request, user)
-                messages.info(request, f"Estas Logeado como {usuario}")
+                messages.success(request, f"Estás logeado como {usuario}")
                 return redirect("Index")
-            else:
-                messages.error(request, f"Usuario o Contraseña Incorrecto")
-        else:
-            messages.error(request, f"Usuario o Contraseña Incorrecto")
+        messages.error(request, "Usuario o contraseña incorrectos")
     form = AuthenticationForm()
     return render(request, "Login.html", {"form": form})
 
-# Vista LogOut
+
 def LogOut_view(request):
+    """Cierra la sesión y regresa a la landing."""
     logout(request)
-    messages.info(request, f"Saliste Exitosamente")
+    messages.info(request, "Saliste exitosamente")
     return redirect("Principal")
 
-# Vista Register
+
 def Registro_view(request):
+    """Crea la cuenta, inicia sesión y lleva al panel (flujo coherente)."""
     if request.method == "POST":
         form = UserCreationForm(request.POST)
         if form.is_valid():
             usuario = form.save()
-            nombre_usuario = form.cleaned_data.get('username')
-            messages.success(request, f"Nueva Cuenta Creada: {nombre_usuario}")
             login(request, usuario)
-            messages.info(request, f"Por Favor Inicia Sesión: {nombre_usuario}")
-            return redirect("Login")
-        else:
-            if form.error_messages:
-                messages.error(request, f"Error")
-                messages.info(request, f"Tomar las Indicaciones Dadas")
-    form = UserCreationForm
-    return render(request, "Registro.html", {"form":form})
+            messages.success(request, f"Nueva cuenta creada: {usuario.username}")
+            return redirect("Index")
+        messages.error(request, "Revisa las indicaciones del formulario")
+    else:
+        form = UserCreationForm()  # Instancia, no la clase
+    return render(request, "Registro.html", {"form": form})
 
-#--------------------------------------------------------------------------------------------------------------
-    
-# Vistas para los Proveedores (View, Add, Change, Delete)
-# Vista View Proveedores
+
+# ------------------------------------------------------------------------------------------------------------------
+# PROVEEDORES (View, Add, Edit, Delete)
+# ------------------------------------------------------------------------------------------------------------------
 class Proveedores_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.view_proveedor')
-    def get(self, request):
-        Proveedores = Proveedor.objects.all()
-        form_personal = AddProveedorForm()
-        form_editar = EditarProveedorForm()
-        context = {
-            'Proveedores': Proveedores,
-            'form_personal': form_personal,
-            'form_editar': form_editar,
-        }
-        return render(request, 'Proveedores.html', context)
+    """Listado de proveedores con formularios modales de alta y edición."""
 
-# Vista Add Proveedores
+    permission_required = ("Bases.view_proveedor",)
+
+    def get(self, request):
+        contexto = {
+            "Proveedores": Proveedor.objects.all(),
+            "form_personal": AddProveedorForm(),
+            "form_editar": EditarProveedorForm(),
+        }
+        return render(request, "Proveedores.html", contexto)
+
+
 class Add_Proveedores_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.add_proveedor')
-    
-    def post(self, request):
-        if request.method == "POST":
-            form = AddProveedorForm(request.POST, request.FILES)
-            if form.is_valid:
-                try:
-                    form.save()
-                except:
-                    messages(request, "Error al Guardar el Proveedor")
-                    return redirect('Proveedores')
-        return redirect('Proveedores')
+    """Alta de proveedores; la validación del formulario es obligatoria."""
 
-# Vista Edit Proveedores
+    permission_required = ("Bases.add_proveedor",)
+
+    def post(self, request):
+        form = AddProveedorForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Proveedor guardado correctamente")
+        else:
+            messages.error(request, "Error al guardar el proveedor: revisa los campos")
+        return redirect("Proveedores")
+
+
 class Edit_Proveedores_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.change_proveedor')
-    def post(self, request):
-        if request.method == "POST":
-            Proveedores = Proveedor.objects.get(pk=request.POST.get('id_personal_editar'))
-            form = EditarProveedorForm(request.POST, request.FILES, instance = Proveedores)
-            if form.is_valid:
-                form.save()
-        return redirect('Proveedores')
+    """Edición de proveedores por id oculto del modal."""
 
-# Vista Delete Proveedores
+    permission_required = ("Bases.change_proveedor",)
+
+    def post(self, request):
+        proveedor = get_object_or_404(Proveedor, pk=request.POST.get("id_personal_editar"))
+        form = EditarProveedorForm(request.POST, request.FILES, instance=proveedor)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Proveedor actualizado")
+        else:
+            messages.error(request, "Error al editar: revisa los campos")
+        return redirect("Proveedores")
+
+
 class Delete_Proveedores_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.delete_proveedor')
+    """Eliminación de proveedores por id oculto del modal."""
+
+    permission_required = ("Bases.delete_proveedor",)
+
     def post(self, request):
-        if request.method == "POST":
-            Proveedores = Proveedor.objects.get(pk=request.POST.get('id_personal_eliminar'))
-            Proveedores.delete()
-        return redirect('Proveedores')
+        proveedor = get_object_or_404(Proveedor, pk=request.POST.get("id_personal_eliminar"))
+        proveedor.delete()
+        messages.success(request, "Proveedor eliminado")
+        return redirect("Proveedores")
 
-#--------------------------------------------------------------------------------------------------------------
 
-# Vistas para los Productos (View, Add, Change, Delete)
-# Vista View Productos
+# ------------------------------------------------------------------------------------------------------------------
+# PRODUCTOS (View, Add, Edit, Delete)
+# ------------------------------------------------------------------------------------------------------------------
 class Productos_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.view_producto')
-    def get(self, request):
-        Productos = Producto.objects.all()
-        form_producto = AddProductoForm()
-        form_editar = EditarProductoForm()
-        context = {
-            'Productos' : Productos,
-            'form_producto': form_producto,
-            'form_editar': form_editar,
-        }
-        return render(request, 'Inventario.html', context)
+    """Inventario de productos con formularios modales."""
 
-# Vista Add Productos
+    permission_required = ("Bases.view_producto",)
+
+    def get(self, request):
+        contexto = {
+            "Productos": Producto.objects.all(),
+            "form_producto": AddProductoForm(),
+            "form_editar": EditarProductoForm(),
+        }
+        return render(request, "Inventario.html", contexto)
+
+
 class Add_Productos_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.add_producto')
-    def post(self, request):
-        if request.method == "POST":
-            form = AddProductoForm(request.POST, request.FILES)
-            if form.is_valid:
-                try:
-                    form.save()
-                except:
-                    messages(request, "Error al Guardar el Producto")
-                    return redirect('Productos')
-        return redirect('Productos')
+    """Alta de productos; validación obligatoria."""
 
-# Vista Edit Productos
+    permission_required = ("Bases.add_producto",)
+
+    def post(self, request):
+        form = AddProductoForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Producto guardado correctamente")
+        else:
+            messages.error(request, "Error al guardar el producto: revisa los campos")
+        return redirect("Productos")
+
+
 class Edit_Productos_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.change_producto')
-    def post(self, request):
-        if request.method == "POST":
-            Productos = Producto.objects.get(pk=request.POST.get('id_producto_editar'))
-            form = EditarProductoForm(request.POST, request.FILES, instance = Productos)
-            if form.is_valid:
-                form.save()
-        return redirect('Productos')
+    """Edición de productos por id oculto del modal."""
 
-# Vista Delete Productos
+    permission_required = ("Bases.change_producto",)
+
+    def post(self, request):
+        producto = get_object_or_404(Producto, pk=request.POST.get("id_producto_editar"))
+        form = EditarProductoForm(request.POST, request.FILES, instance=producto)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Producto actualizado")
+        else:
+            messages.error(request, "Error al editar: revisa los campos")
+        return redirect("Productos")
+
+
 class Delete_Productos_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.delete_producto')
-    def post(self, request):
-        if request.method == "POST":
-            Productos = Producto.objects.get(pk=request.POST.get('id_producto_eliminar'))
-            Productos.delete()
-        return redirect('Productos')
+    """Eliminación de productos por id oculto del modal."""
 
-#--------------------------------------------------------------------------------------------------------------
-    
-# Vistas para el ControlTemperaturas (View, Add, Change, Delete)
-# Vista View ControlTemperaturas
+    permission_required = ("Bases.delete_producto",)
+
+    def post(self, request):
+        producto = get_object_or_404(Producto, pk=request.POST.get("id_producto_eliminar"))
+        producto.delete()
+        messages.success(request, "Producto eliminado")
+        return redirect("Productos")
+
+
+# ------------------------------------------------------------------------------------------------------------------
+# CONTROL DE TEMPERATURAS (View, Add, Edit, Delete)
+# ------------------------------------------------------------------------------------------------------------------
 class ControlTemperaturas_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.view_controltemperatura')
+    """Registros de cadena de frío con formularios modales."""
+
+    permission_required = ("Bases.view_controltemperatura",)
+
     def get(self, request):
-        ControlTemperaturas = ControlTemperatura.objects.all()
-        form_controltemperatura = AddControlTemperaturaForm()
-        form_editar = EditarControlTemperaturaForm()
-        context = {
-            'ControlTemperaturas': ControlTemperaturas,
-            'form_controltemperatura': form_controltemperatura,
-            'form_editar': form_editar,
+        contexto = {
+            "ControlTemperaturas": ControlTemperatura.objects.all(),
+            "form_controltemperatura": AddControlTemperaturaForm(),
+            "form_editar": EditarControlTemperaturaForm(),
         }
-        return render(request, 'ControlTemperaturas.html', context)
+        return render(request, "ControlTemperaturas.html", contexto)
 
-# Vista Add ControlTemperaturas
+
 class Add_ControlTemperaturas_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.add_controltemperatura')
-    def post(self, request):
-        if request.method == "POST":
-            form = AddControlTemperaturaForm(request.POST, request.FILES)
-            if form.is_valid:
-                try:
-                    form.save()
-                except:
-                    messages(request, "Error al Guardar el ControlTemperatura")
-                    return redirect('ControlTemperaturas')
-        return redirect('ControlTemperaturas')
+    """Alta de registros de temperatura; validación obligatoria."""
 
-# Vista Edit ControlTemperaturas
+    permission_required = ("Bases.add_controltemperatura",)
+
+    def post(self, request):
+        form = AddControlTemperaturaForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Registro guardado correctamente")
+        else:
+            messages.error(request, "Error al guardar el registro: revisa los campos")
+        return redirect("ControlTemperaturas")
+
+
 class Edit_ControlTemperaturas_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.change_controltemperatura')
-    def post(self, request):
-        if request.method == "POST":
-            ControlTemperaturas = ControlTemperatura.objects.get(pk=request.POST.get('id_personal_editar'))
-            form = EditarControlTemperaturaForm(request.POST, request.FILES, instance = ControlTemperaturas)
-            if form.is_valid:
-                form.save()
-        return redirect('ControlTemperaturas')
+    """Edición de registros por id propio (id_control_editar)."""
 
-# Vista Delete ControlTemperaturas
+    permission_required = ("Bases.change_controltemperatura",)
+
+    def post(self, request):
+        registro = get_object_or_404(ControlTemperatura, pk=request.POST.get("id_control_editar"))
+        form = EditarControlTemperaturaForm(request.POST, request.FILES, instance=registro)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Registro actualizado")
+        else:
+            messages.error(request, "Error al editar: revisa los campos")
+        return redirect("ControlTemperaturas")
+
+
 class Delete_ControlTemperaturas_view(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
-    permission_required = ('Bases.delete_controltemperatura')
+    """Eliminación de registros por id propio (id_control_eliminar)."""
+
+    permission_required = ("Bases.delete_controltemperatura",)
+
     def post(self, request):
-        if request.method == "POST":
-            ControlTemperaturas = ControlTemperatura.objects.get(pk=request.POST.get('id_personal_eliminar'))
-            ControlTemperaturas.delete()
-        return redirect('ControlTemperaturas')
+        registro = get_object_or_404(ControlTemperatura, pk=request.POST.get("id_control_eliminar"))
+        registro.delete()
+        messages.success(request, "Registro eliminado")
+        return redirect("ControlTemperaturas")
 
-#--------------------------------------------------------------------------------------------------------------
 
-# Vistas para las Ventas (Caja, Ticket)
-# Vista Environment
+# ------------------------------------------------------------------------------------------------------------------
+# VENTAS (CAJA): autocompletado, guardado y ticket
+# ------------------------------------------------------------------------------------------------------------------
 class Ventas(ValidarPermisosMixin, ValidarRestriccionesMixin, ListView):
+    """Punto de venta: búsqueda de productos, carrito y registro de la venta."""
 
-    template_name = 'Ventas.html'
+    template_name = "Ventas.html"
     model = Egreso
-    permission_required = ('Bases.view_egreso', 'Bases.add_egreso', 'Bases.delete_egreso', 'Bases.change_egreso')
+    permission_required = (
+        "Bases.view_egreso",
+        "Bases.add_egreso",
+        "Bases.delete_egreso",
+        "Bases.change_egreso",
+    )
 
-    def dispatch(self,request,*args,**kwargs):
-        return super().dispatch(request, *args, **kwargs)
-    """
-    def get_queryset(self):
-        return ProductosPreventivo.objects.filter(
-            preventivo=self.kwargs['id']
-        )
-    """
-    def post(self, request,*ars, **kwargs):
+    def get_context_data(self, **kwargs):
+        """Añade al contexto la lista de productos y la fecha de hoy ({{HOY}})."""
+        contexto = super().get_context_data(**kwargs)
+        contexto["productos_lista"] = Producto.objects.all()
+        contexto["HOY"] = timezone.localdate()
+        contexto["moneda"] = "$"
+        return contexto
+
+    def post(self, request, *args, **kwargs):
+        """Endpoint AJAX del punto de venta: 'autocomplete' y 'save'."""
         data = {}
         try:
-            action = request.POST['action']
-            if action == 'autocomplete':
+            action = request.POST["action"]
+            if action == "autocomplete":
                 data = []
-                for i in Producto.objects.filter(descripcion__icontains=request.POST["term"])[0:10]:
-                    item = i.toJSON()
-                    item['value'] = i.descripcion
+                termino = request.POST.get("term", "")
+                for producto in Producto.objects.filter(nombre__icontains=termino)[:10]:
+                    item = producto.toJSON()
+                    # El frontend espera «descripcion»; el modelo usa «nombre».
+                    item["descripcion"] = producto.nombre
+                    item["value"] = producto.nombre
                     data.append(item)
+            elif action == "save":
+                data = self._guardar_venta(request)
             else:
-                data['error'] = "Ha ocurrido un error"
-        except Exception as e:
-            data['error'] = str(e)
+                data = {"error": "Acción no soportada"}
+        except Exception as exc:  # El frontend muestra el error con Swal
+            data = {"error": str(exc)}
+        return JsonResponse(data, safe=False)
 
-        return JsonResponse(data,safe=False)
+    @staticmethod
+    def _decimal(valor, defecto="0"):
+        """Convierte a Decimal de forma segura (carrito y pagos vienen como texto)."""
+        try:
+            return Decimal(str(valor))
+        except (InvalidOperation, TypeError):
+            return Decimal(defecto)
 
-    # Vista Ticket
-    def Export_view(request, id, iva):
-        #print(id)
-        template = get_template("Ticket.html")
-        #print(id)
-        subtotal = 0 
-        iva_suma = 0 
+    def _guardar_venta(self, request):
+        """Crea el Egreso y sus ProductosEgreso dentro de una transacción atómica."""
+        carrito = json.loads(request.POST.get("verts", "{}"))
+        productos = carrito.get("products", carrito) if isinstance(carrito, dict) else carrito
+        if not productos:
+            raise ValueError("El carrito está vacío")
 
-        venta = Egreso.objects.get(pk=float(id))
+        with transaction.atomic():
+            egreso = Egreso.objects.create(
+                fecha_pedido=request.POST.get("fecha") or timezone.localdate(),
+                comentarios=request.POST.get("comentarios", ""),
+                ticket=request.POST.get("ticket", "").lower() in ("1", "si", "sí", "true"),
+                desglosar=request.POST.get("desglosar", "0") == "1",
+            )
+            total_venta = Decimal("0")
+            for linea in productos:
+                producto = Producto.objects.get(pk=linea["id"])
+                cantidad = self._decimal(linea.get("cantidad", 1))
+                precio = self._decimal(linea.get("precio", 0))
+                subtotal = (cantidad * precio).quantize(Decimal("0.01"))
+                iva = (subtotal * TASA_IVA).quantize(Decimal("0.01"))
+                total = subtotal + iva
+                ProductosEgreso.objects.create(
+                    egreso=egreso,
+                    producto=producto,
+                    cantidad=cantidad,
+                    precio=precio,
+                    subtotal=subtotal,
+                    iva=iva,
+                    total=total,
+                )
+                total_venta += total
+            pagado = sum(
+                (self._decimal(request.POST.get(medio, "0"))
+                 for medio in ("efectivo", "tarjeta", "transferencia", "vales", "otro")),
+                Decimal("0"),
+            )
+            egreso.total = total_venta
+            egreso.pagado = pagado
+            egreso.save()
+
+        # Contrato con el frontend: [id_egreso, éxito, desglosar_iva]
+        return [egreso.id, True, "true" if egreso.desglosar else "false"]
+
+    @staticmethod
+    def Export_view(request, id=None, iva="false"):
+        """Genera el ticket de la venta como HTML imprimible (Ctrl+P → PDF).
+
+        Nota: si se desea PDF directo del servidor, instala weasyprint y
+        descomenta el bloque correspondiente; por ahora se evita esa
+        dependencia pesada y se imprime desde el navegador.
+        """
+        if id is None:
+            return redirect("Ventas")
+        venta = get_object_or_404(Egreso, pk=id)
         datos = ProductosEgreso.objects.filter(egreso=venta)
-        for i in datos:
-            subtotal = subtotal + float(i.subtotal)
-            iva_suma = iva_suma + float(i.iva)
-
-        empresa = "DiFarma de C.V"
-        context ={
-            'num_ticket': id,
-            'iva': iva,
-            'fecha': venta.fecha_pedido,
-            'items': datos, 
-            'total': venta.total, 
-            'empresa': empresa,
-            'comentarios': venta.comentarios,
-            'subtotal': subtotal,
-            'iva_suma': iva_suma,
+        subtotal = sum((linea.subtotal for linea in datos), Decimal("0"))
+        iva_suma = sum((linea.iva for linea in datos), Decimal("0"))
+        contexto = {
+            "num_ticket": venta.id,
+            "iva": iva,
+            "fecha": venta.fecha_pedido,
+            "items": datos,
+            "total": venta.total,
+            "comentarios": venta.comentarios,
+            "subtotal": subtotal,
+            "iva_suma": iva_suma,
+            "empresa": {
+                "nombre": "DiFarma de C.V.",
+                "domicilio": "Calle 123 #45-67, Bogotá D.C.",
+                "telefono": "+57 601 000 0000",
+                "moneda": "$",
+                "imagen": None,  # Sin logo por ahora; la plantilla lo omite
+            },
         }
-        html_template = template.render(context)
-        response = HttpResponse(content_type="application/pdf")
-        response["Content-Disposition"] = "inline; Ticket.pdf"
-        css_url = os.path.join(settings.BASE_DIR,'index\static\index\css/bootstrap.min.css')
-        #HTML(string=html_template).write_pdf(target="ticket.pdf", stylesheets=[CSS(css_url)])
-    
-        #font_config = FontConfiguration()
-        #HTML(string=html_template, base_url=request.build_absolute_uri()).write_pdf(target=response, font_config=font_config,stylesheets=[CSS(css_url)])
-    
-#--------------------------------------------------------------------------------------------------------------
+        html = get_template("Ticket.html").render(contexto)
+        respuesta = HttpResponse(html)
+        respuesta["Content-Disposition"] = f'inline; filename="ticket_{venta.id}.html"'
+        return respuesta

@@ -26,10 +26,10 @@
                         {% for i in productos_lista %}
                         <tr>
                             <td>{{i.id}}</td>
-                            <td>{{i.descripcion}}</td>
+                            <td>{{i.nombre}}</td>
                             <td>$ {{i.precio}}</td>
                             <td>
-                                <button onclick="addProductList('{{i.id}}', '{{i.descripcion}}','{{i.precio}}')"
+                                <button onclick="addProductList('{{i.id}}', '{{i.nombre}}','{{i.precio}}')"
                                     class="btn btn-success" data-dismiss="modal" type="button">
                                     <i class="fas fa-share-square"></i>
                                 </button>

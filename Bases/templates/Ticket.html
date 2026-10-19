@@ -18,7 +18,7 @@
     <div class="container">
         <div class="row">
             <div class="col-12 text-center">
-                <img src="{{empresa.imagen.url}}" alt="Logo empresa" width="30" height="3"> <br>
+                {% if empresa.imagen %}<img src="{{ empresa.imagen }}" alt="Logo empresa" width="30" height="3"> <br>{% endif %}
                 # Ticket: {{num_ticket}} <br>
                 Fecha: {{fecha}} <br>
                 <h5> <b>{{empresa.nombre}} </b></h5>
@@ -42,7 +42,7 @@
                         {% for i in items %}
                         <tr>
                             <td>{{i.cantidad}}</td>
-                            <td>{{i.producto.descripcion}}</td>
+                            <td>{{i.producto.nombre}}</td>
                             <td>{{empresa.moneda}} {{i.total|intcomma}}</td>
 
                         </tr>
@@ -51,7 +51,7 @@
                         {% for i in items %}
                         <tr>
                             <td>{{i.cantidad}}</td>
-                            <td>{{i.producto.descripcion}}</td>
+                            <td>{{i.producto.nombre}}</td>
                             <td>{{empresa.moneda}} {{i.subtotal|intcomma}}</td>
                         </tr>
                         {% endfor %}

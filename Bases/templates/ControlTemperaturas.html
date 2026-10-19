@@ -1,0 +1,188 @@
+{% extends "Base.html" %}
+
+{% load static %}
+{% load widget_tweaks %}
+
+{% block content %}
+
+<link rel="stylesheet" href="{% static 'index/css/b4.css' %}">
+<script src="{% static 'index/js/b4.js' %}"></script>
+
+<!-- ============================================================
+     MODAL: Agregar registro de control de temperatura
+     ============================================================ -->
+<div id="AgregarControlModal" class="modal" style="overflow: scroll;">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info">
+                <h5 class="modal-title text-dark">Agregar nuevo registro</h5>
+            </div>
+            <div class="modal-body bg-dark text-white">
+                <form method="POST" action="{% url 'AddControlTemperaturas' %}" enctype="multipart/form-data">{% csrf_token %}
+                    {% for field in form_controltemperatura %}
+                    <p>{{field.label}} <br>
+                        {{field|add_class:"form-control text-dark"}}</p>
+                    {% for error in field.errors %}
+                    <p class="alarma">{{error}}</p>
+                    {% endfor %}
+                    {% endfor %}
+                    {% for error in form_controltemperatura.non_field_errors %}
+                    <p class="alarma">{{error}}</p>
+                    {% endfor %}
+            </div>
+            <div class="modal-footer bg-dark">
+                <button type="button" class="btn btn-danger" data-dismiss="modal">
+                    Cancelar
+                </button>
+                <button type="submit" class="btn btn-success">
+                    Agregar
+                </button>
+            </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: Editar registro (id oculto: id_control_editar)
+     ============================================================ -->
+<div id="EditarControlModal" class="modal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info">
+                <h5 class="modal-title text-dark">Editar</h5>
+            </div>
+            <div class="modal-body bg-dark text-white">
+                <form method="POST" action="{% url 'EditControlTemperaturas' %}" enctype="multipart/form-data">{% csrf_token %}
+                    <input type="hidden" id="id_control_editar" name="id_control_editar">
+                    {% for field in form_editar %}
+                    <p> {{field.label}} <br>
+                        {{field|add_class:"form-control"}}</p>
+                    {% for error in field.errors %}
+                    <p class="alarma">{{error}}</p>
+                    {% endfor %}
+                    {% endfor %}
+                    {% for error in form_editar.non_field_errors %}
+                    <p class="alarma">{{error}}</p>
+                    {% endfor %}
+            </div>
+            <div class="modal-footer bg-dark text-white">
+                <button type="button" class="btn btn-danger" data-dismiss="modal">
+                   Volver
+                </button>
+                <button type="submit" class="btn btn-success">
+                    Aceptar
+                </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: Eliminar registro (id oculto: id_control_eliminar)
+     ============================================================ -->
+<div id="EliminarControlModal" class="modal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-info">
+                <h5 class="modal-title text-dark">Eliminar</h5>
+            </div>
+            <div class="modal-body bg-dark text-white">
+                <p class="labelmodal">¿Estás seguro?</p>
+                <form method="POST" action="{% url 'DeleteControlTemperaturas' %}">{% csrf_token %}
+                    <input type="hidden" id="id_control_eliminar" name="id_control_eliminar">
+            </div>
+            <div class="modal-footer bg-dark text-white">
+                <button type="button" class="btn btn-danger" data-dismiss="modal">
+                   Volver
+                </button>
+                <button type="submit" class="btn btn-success">
+                    Aceptar
+                </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     TABLA DE REGISTROS DE CADENA DE FRÍO
+     ============================================================ -->
+<div class="row">
+    <div class="col-md-12">
+        <h3 class="text-center"><i class="fas fa-thermometer-half"></i></h3>
+        <h3 class="text-center">Control de Temperaturas</h3>
+        <div class="col-md-3 pb-2">
+            <a href="#AgregarControlModal"
+                data-toggle="modal" data-dismiss="modal">
+                <button type="button" class="btn btn-success">
+                    Agregar Registro
+                    <i class="fas fa-plus-circle"></i>
+                </button>
+            </a>
+        </div>
+        <div class="card card-body" style="overflow:scroll">
+            <table class="table table-hover table-primary" id="myTable">
+                <thead>
+                    <tr>
+                        <th># ID</th>
+                        <th>Fecha</th>
+                        <th>Hora</th>
+                        <th>Humedad (%)</th>
+                        <th>Temperatura (°C)</th>
+                        <th>Opciones</th>
+                    </tr>
+                </thead>
+                <tbody class="text-dark">
+                    {% for i in ControlTemperaturas %}
+                    <tr>
+                        <td>{{i.id}}</td>
+                        <td>{{i.fechacontrol}}</td>
+                        <td>{{i.horacontrol}}</td>
+                        <td>{{i.humedad}}</td>
+                        <td>{{i.temperatura}}</td>
+                        <td>
+                            <button onclick="editarControl('{{i.id}}', '{{i.fechacontrol}}', '{{i.horacontrol}}', '{{i.humedad}}', '{{i.temperatura}}')" class="btn btn-dark-outline btn-sm" data-toggle="modal"
+                                href="#EditarControlModal"><img src="{% static 'index/img/editar.png' %}" alt="Editar"
+                                    width="30"></button>
+                            <button onclick="eliminarControl('{{i.id}}')" class="btn btn-dark-outline btn-sm"
+                                data-toggle="modal" href="#EliminarControlModal"><img
+                                    src="{% static 'index/img/delete.png' %}" alt="Eliminar" width="30"></button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Rellena el formulario de edición con los datos de la fila seleccionada.
+    function editarControl(id, fecha, hora, humedad, temperatura) {
+        document.getElementById("id_control_editar").value = id;
+        document.getElementById("fechacontrol_editar").value = fecha;
+        document.getElementById("horacontrol_editar").value = hora;
+        document.getElementById("humedad_editar").value = humedad;
+        document.getElementById("temperatura_editar").value = temperatura;
+    }
+
+    // Carga el identificador del registro que se va a eliminar.
+    function eliminarControl(id) {
+        document.getElementById("id_control_eliminar").value = id;
+    }
+</script>
+
+{% if messages %}
+{% for message in messages %}
+<script>
+    Swal.fire({
+        icon: 'error',
+        title: 'Aviso...',
+        text: "{{message}}",
+    })
+</script>
+{% endfor %}
+{% endif %}
+{% endblock %}
