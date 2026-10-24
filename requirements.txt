@@ -1,4 +1,4 @@
 # DiFarma — dependencias del proyecto (Python 3.10+)
 # Instalación: pip install -r requirements.txt
-Django>=4.2,<5.0
+Django>=6.1.2,<7.0
 django-widget-tweaks>=1.5.0
